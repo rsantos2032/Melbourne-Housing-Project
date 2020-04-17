@@ -1,0 +1,356 @@
+---
+title: "STAT 420: Final Project"
+author: "STAT 420, Summer 2019, Gauri Konanoor (gmk2), Rolando Santos (rsantos3), Chinmaya Sharma (csharma4)"
+date: 'Aug 3rd, 2019'
+output:
+  html_document: 
+    toc: yes
+    theme: default
+  pdf_document: default
+urlcolor: cyan
+---
+
+***
+
+```{r setup, echo = FALSE, message = FALSE, warning = FALSE}
+options(scipen = 1, digits = 4, width = 80, fig.align = "center")
+```
+
+# Melbourne Housing Price Predictive Model
+
+## Introduction
+
+This study is aimed at analyzing information about Melbourne's housing market from January 2016 to December 2018, with the goal of designing a predictive model to predict future housing prices. 
+
+### Source
+
+The dataset can be found on Kaggle (https://www.kaggle.com/anthonypino/melbourne-housing-market/downloads/melbourne-housing-market.zip/27#MELBOURNE_HOUSE_PRICES_LESS.csv)
+
+### Variables
+
+The datset has 13 different variables, however, this study will use only 7, each of which is listed below:
+
+- **price** : Price in Australian Dollars (Response)
+- **rooms** : Number of rooms
+- **method** : 
+  + `PI` - property passed in
+  + `S` - property sold
+  + `SA` - property sold after auction
+  + `SP` - property sold prior
+  + `VB` - vendor bid
+- **type** : 
++ `h` - house, cottage, villa, terrace
++ `u` - unit, duplex
++ `t` - townhouse
+- **distance** : Distance from Central Business District (CBD) in Kilometres
+- **propertycount** : Number of properties that exist in the suburb
+- **region**
+  + `Eastern Metropolitan`
+  + `Northern Metropolitan`
+  + `South-Eastern Metropolitan`
+  + `Southern Metropolitan`
+  + `Western Metropolitan`
+  
+Each group member will try to fit several models with the `price` as the response, and a combination of the remaining variables as predictors. The best model fit by each member will be listed below, and will be discussed in the `Results` and `Discussion` sections that follow.
+
+## Methods
+
+```{r}
+# Set seed to ensure you always have same random numbers generated
+set.seed(42)   
+```
+
+Before we begin fitting models, we must first import data from `melbourne.csv`, and filter out rows with missing values.
+
+```{r message=FALSE, warning=FALSE}
+# Load CSV file
+melbourne_data = read.csv("melbourne.csv")
+# Select desired variables from the imported dataset
+melbourne = data.frame(rooms = melbourne_data$Rooms, 
+                       type = melbourne_data$Type,
+                       price = melbourne_data$Price,
+                       method = melbourne_data$Method,
+                       region = melbourne_data$Regionname,
+                       propertycount = melbourne_data$Propertycount,
+                       distance = melbourne_data$Distance)
+
+# Omit NA values
+melbourne = na.omit(melbourne)
+```
+
+
+### Helper Functions
+
+```{r}
+# Plots "Fitted vs Residual" and "Q-Q" Plots 
+plot_diagnostics = function(model) {
+  par(mfrow = c(1, 2))
+  plot(fitted(model), resid(model), 
+       col = "grey", pch = 20, 
+       xlab = "Fitted", ylab = "Residuals", 
+       main = "Data from Additive Model")
+  abline(h = 0, col = "darkorange", lwd = 2)
+  qqnorm(resid(model), main = "Normal Q-Q Plot", col = "darkgrey")
+  qqline(resid(model), col = "dodgerblue", lwd = 2)
+}
+
+# Calculates RMSE given "actual" and "predicted values"
+
+get_train_rmse = function(model) {
+  predicted = exp(predict(model, melbourne_trn))
+  sqrt(mean((predicted - melbourne_trn$price)^2))
+}
+
+get_test_rmse = function(model) {
+  predicted = exp(predict(model, melbourne_tst))
+  sqrt(mean((predicted - melbourne_tst$price)^2))
+}
+```
+
+### Preliminary Investigation
+
+Now, we will examine the predictors that we are left with. All of them are likely to be significant predictors. Let us examine and diagnose a simple additive model:
+
+```{r}
+fit_prelim = lm(price ~ ., data = melbourne)
+```
+
+A quick examining of the data tells us that there are some houses with 7, 8, 11, 16 rooms, and even 31 rooms.
+
+```{r}
+hist(melbourne$rooms, xlim = c(0, max(melbourne$rooms)), main = "Histogram of Rooms")
+```
+
+It is highly likely that these points are very influential and throw off the prediction. Let us check:
+
+```{r}
+sum(cooks.distance(fit_prelim)[melbourne$rooms > 6] > 4 / length(cooks.distance(fit_prelim))) / sum(melbourne$rooms > 6)
+```
+
+As expected, most of these points are influential by the conventional heuristic, and for the purposes of our study, all houses with more than 6 rooms are too influential and skew the model, so let us get rid of houses with more than 6 rooms, and refit the model.
+
+```{r}
+# Omit unwanted rows with "rooms" > 6 
+melbourne = melbourne[melbourne$rooms <= 6, ]
+fit_prelim = lm(price ~ ., data = melbourne)
+```
+
+Similarly, let us check how many of the houses in this dataset are in the region of `Victoria`, and let us check how influential they are.
+
+```{r}
+victoria = (melbourne$region == "Eastern Victoria") | (melbourne$region == "Western Victoria") | (melbourne$region == "Northern Victoria")
+sum(cooks.distance(fit_prelim)[victoria] > 4 / length(cooks.distance(fit_prelim))) / sum(victoria)
+```
+
+A good number of them are influential, certainly enough to further investigate. Let us examine their leverage:
+
+```{r}
+sum(hatvalues(fit_prelim)[victoria] > 2 * mean(hatvalues(fit_prelim))) / sum(victoria)
+```
+
+All houses in Victoria have high leverage! Let's get rid of them, and refit the model.
+
+```{r}
+# Omit unwanted levels for "region" from dataset
+melbourne = melbourne[melbourne$region != "Eastern Victoria", ]
+melbourne = melbourne[melbourne$region != "Northern Victoria", ]
+melbourne = melbourne[melbourne$region != "Western Victoria", ]
+```
+
+Now that we have an ideal dataset, let us finetune our predictive model.
+
+```{r}
+fit_prelim = lm(price ~ ., data = melbourne)
+plot_diagnostics(fit_prelim)
+```
+
+It is evident from the Q-Q Plot and the Fitted-vs-Residuals plot that `Price` increases as an exponential function of the variables, so we must do a log transformation on our response variable.
+
+```{r}
+fit_prelim = lm(log(price) ~ ., data = melbourne)
+plot_diagnostics(fit_prelim)
+```
+
+We then split the resulting dataset into training and testing datasets, using an 80:20 split.
+
+```{r}
+sample_size = floor(0.8 * nrow(melbourne)) 
+indices = sample(seq_len(nrow(melbourne)), size = sample_size)
+melbourne_trn = melbourne[indices,]
+melbourne_tst = melbourne[-indices,]
+
+# Creating arrays to store variables pertaining to models outlined in the subsequent sections.
+adj_r_squared = rep(0, 6)
+bptest_pval = rep(0, 6)
+max_vif = rep(0, 6)
+```
+
+
+After the preliminary investigation, we worked on creating several different models, each of which is listed below.
+
+### Models
+
+```{r, message=FALSE, warning=FALSE}
+library(lmtest)
+library(faraway)
+```
+
+Model 1
+
+Let us start with a simple additive model with all predictors.
+
+```{r}
+fit_additive = lm(log(price) ~ ., data = melbourne_trn)
+adj_r_squared[1] = summary(fit_additive)$adj.r.squared
+max_vif[1] = max(vif(fit_additive))
+```
+
+Model 2
+
+We had found that one of our current predictors, `distance` has a difficult interaction with the rest of our model, so let's try a model without `distance`. 
+
+```{r}
+fit_no_distance = lm(log(price) ~ . - distance, data = melbourne_trn)
+adj_r_squared[2] = summary(fit_no_distance)$adj.r.squared
+bptest_pval[2] = bptest(fit_no_distance)$p.value
+max_vif[2] = max(vif(fit_no_distance))
+```
+
+Model 3
+
+There must be a few two-way interactions that are significant in predicting `price`, so let us create a model with all two-way interactions to determine which interactions are significant.
+
+```{r}
+fit_two_way = lm(log(price) ~ (rooms + region + method + propertycount + type)^2, data = melbourne_trn)
+adj_r_squared[3] = summary(fit_two_way)$adj.r.squared
+bptest_pval[3] = bptest(fit_two_way)$p.value
+max_vif[3] = max(vif(fit_two_way))
+```
+
+Model 4
+
+```{r}
+fit_two_way_bic = step(fit_additive, direction = "backward", k = log(length(resid(fit_two_way))), trace = 0)
+adj_r_squared[4] = summary(fit_two_way_bic)$adj.r.squared
+bptest_pval[4] = bptest(fit_two_way_bic)$p.value
+max_vif[4] = max(vif(fit_two_way_bic))
+```
+
+Model 5
+
+We were also curious to explore some specific interactions and how they affected the model. Let us start with `type` and `rooms` because even for each type of house, be it a cottage or a townhouse, an increase in the number of rooms is likely to affect the price differently for each type.
+
+```{r}
+fit_interactive_1 = lm(log(price) ~ propertycount + rooms + type + method + region 
+         + type:rooms, data = melbourne_trn)
+adj_r_squared[5] = summary(fit_interactive_1)$adj.r.squared
+bptest_pval[5] = bptest(fit_interactive_1)$p.value
+max_vif[5] = max(vif(fit_interactive_1))
+```
+
+Model 6
+
+Let us try adding an interaction between `method` and `propertycount` because depending on the number of houses in a region, it is possible that the method of selling the house affects the sale of the house.
+
+```{r}
+fit_interactive_2 = lm(log(price) ~ propertycount + rooms + type + method + region 
+         + type:rooms + method:propertycount, data = melbourne_trn)
+adj_r_squared[6] = summary(fit_interactive_2)$adj.r.squared
+bptest_pval[6] = bptest(fit_interactive_2)$p.value
+max_vif[6] = max(vif(fit_interactive_2))
+```
+
+## Results
+
+### Plot Diagnostics 
+
+Plot Diagnostics for our Additive Model:
+
+```{r}
+plot_diagnostics(fit_additive)
+```
+
+Plot Diagnostics of Log-Fitted Model without Distance
+
+```{r}
+plot_diagnostics(fit_no_distance)
+```
+
+Plot Diagnostics of Log-Fitted Model with Two-Way Interactions
+
+```{r}
+plot_diagnostics(fit_no_distance)
+```
+
+Plot Diagnostics of Two-Way Model Reduced by Backwards BIC:
+
+```{r}
+plot_diagnostics(fit_two_way_bic)
+```
+
+Plot Diagnostics of Log-Fitted Model with a Single Interaction:
+
+```{r}
+plot_diagnostics(fit_interactive_1)
+```
+
+Plot Diagnostics of a Log-Fitted Model with Two Interactions:
+
+```{r}
+plot_diagnostics(fit_interactive_2)
+```
+
+### RMSE Comparison
+
+The following is a table comparing the Testing and Training RMSE values from our models:
+
+```{r}
+library(knitr)
+
+mod_list = list(fit_additive, fit_no_distance, fit_two_way, fit_two_way_bic, fit_interactive_1, fit_interactive_2)
+
+rsme_table = data.frame(c("Log Additive", "Additive without Distance", "Two-Way Interaction", "Two-Way BIC", "Selectively Interactive 1", "Selectively Interactive 2"), sapply(mod_list, get_train_rmse), sapply(mod_list, get_test_rmse))
+
+kable(rsme_table, format = "markdown", col.names = c("Model", "Training RMSE", "Testing RMSE"))
+```
+
+### R-Squared, VIF & BP Test
+
+The following table constains $R^2$, max VIF and p-values were obtained for BP Tests performed on our models:
+
+```{r}
+alt_table = data.frame(Model = c("Log Additive", "Additive without Distance", "Two-Way Interaction", "Two-Way BIC", "Selectively Interactive 1", "Selectively Interactive 2"), adj_r_squared, max_vif, bptest_pval)
+
+kable(alt_table, format = "markdown", col.names = c("Model", "Adj. R Squared", "Max VIF", "BP Test p-value"))
+```
+
+## Discussion
+
+### Plot Diagnostics
+
+Although this study intended to fit a good predictive model, the group members decided that all models must hold for all LINE assumptions, for them to be considered. Looking at the plot diagnostics, we notice the following:
+
+- `Model 1`s Q-Q Plot had an evident tail on the right hand side, which resulted in a violation of the normality assumption.
+- `Model 2` appeared to hold for all assumptions.
+- `Model 3` appeared to hold for all assumptions.
+- `Model 4`'s Q-Q Plot had an evident tail on the right hand side, which resulted in a violation of the normality assumption.
+- `Model 5` appeared to hold for all assumptions.
+- `Model 6` appeared to hold for all assumptions.
+
+### RMSE Comparison
+
+In terms of RMSEs, `Model 1` and `Model 4` appeared to have the lowest Test RMSE values of `r get_test_rmse(fit_additive)` and `r get_test_rmse(fit_two_way_bic)`. However, since both of them had violated the normality assumption earlier, they are no longer considered. `Model 3` has the next lowest Test RMSE value of `r get_test_rmse(fit_two_way)`, and `Model 6` follows with a value of `r get_test_rmse(fit_interactive_2)`  
+
+### R-Squared, VIF & BP Test
+
+Like RMSE, Adjusted R-Squared follows a similar pattern with `Model 1` and `Model 4` having the largest values of `r adj_r_squared[1]` and `r adj_r_squared[4]`, but these models will not be considered because they violated the normailty assumption. The next best is `Model 3` with an Ajusted R-Squared value of  `r adj_r_squared[3]`, and `Model 6` follows with a value of `r adj_r_squared[6]`
+
+We also look at max Variance Inflation Factors for all models, to determine the collinearity bwtween predictors. In this process, we find that `Model 1`, `Model 2` and `Model 4` have low collinearity, since their largest VIF is under 5. However, the remaining models seem to suffer from collinearity. However, this is expected since the remaining models involve interaction terms, which lead to high collinearity.
+
+For the BP Test, p-values for all of our models are extremely small, which may be because the function itself is on the picky side, thus we resort to looking at the plots for our interpretations of the model.
+
+
+## Conclusion
+
+**Model 3**, which comprises of `rooms`, `region`, `method`, `propertycount`, `type`and their two-way interactions as the predictors, is the best model. Even though it may not have the lowest Test RMSE, it does not violate any of the four LINE assumptions, and has the next best Test RMSE and Adjusted R-Squared values after eliminated models.
+

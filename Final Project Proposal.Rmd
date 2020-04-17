@@ -1,0 +1,50 @@
+---
+title: "Final Project Proposal"
+author: "By Rolando Santos (rsantos3), Gauri Konanoor (gmk2), Chinmaya Sharma (csharma4)"
+date: "7/13/2019"
+output: 
+    html_document :
+        toc : yes
+---
+
+# Tentative Title
+
+Melbourne Housing Prices
+
+# Background information
+This dataset contains information about the housing market in Melbourne from Jan 2016 to December 2018. There is data about the housing prices, location as well as details about the property such as size of land, number of rooms, etc. 
+
+# Source
+https://www.kaggle.com/anthonypino/melbourne-housing-market/downloads/melbourne-housing-market.zip/27#MELBOURNE_HOUSE_PRICES_LESS.csv
+
+# Variables (Description)
+
+- Price : Price in Australian Dollars (Response)
+- Rooms : Number of rooms
+- Method : 
+  + S - property sold
+  + SP - property sold prior
+  + PI - property passed in
+  + PN - sold prior not disclosed
+  + SN - sold not disclosed
+  + NB - no bid
+  + ...
+- Type : 
+  + h - house, cottage, villa, terrace
+  + u - unit, duplex
+  + t - townhouse
+- Distance : Distance from Central Business District (CBD) in Kilometres
+- Propertycount : Number of properties that exist in the suburb
+
+# Interest
+In 2016, Melbourne experienced a housing bubble marked by a rapid increase in demand for housing, and the original purpose for this dataset was to predict future demand in Melbourne housing. For this project, however, we will focus on how aforementioned variables like `Distance`, `Propertycount`, `Rooms`, `Method`, and potentially other variables as well, and how these variables play a role in influencing housing prices.
+
+# Evidence 
+
+```{r message=FALSE, warning=FALSE}
+# dataset response observations pre-cleaning
+library(readr)
+melbourne <- read_csv("melbourne.csv")
+head(melbourne$Price, 20)
+```
+
